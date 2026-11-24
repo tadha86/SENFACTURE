@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Générateur de clés d’activation</title>
+<style>
+:root{--bg:#f6f8f4;--card:#fff;--ink:#16241e;--mut:#5d6b64;--line:#dce4de;--g:#1b6b4a;--gt:#fff;--r:#b3321f;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1612;--card:#16211b;--ink:#e8efe9;--mut:#9baba2;--line:#2a3a31;--g:#52bd8d;--gt:#0e1612;--r:#f08577}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:18px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+.mut{color:var(--mut);font-size:13px}.warn{color:var(--r);font-weight:600}
+label{display:block;font-size:13px;font-weight:600;color:var(--mut);margin:10px 0 0}
+input,select,textarea{display:block;width:100%;margin-top:4px;padding:9px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px}
+textarea{font-family:ui-monospace,Consolas,monospace;font-size:12px;min-height:96px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}
+button{font:inherit;font-weight:700;cursor:pointer;background:var(--g);color:var(--gt);border:1px solid var(--g);border-radius:8px;padding:9px 14px;margin:10px 8px 0 0}
+button.sec{background:transparent;color:var(--g)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+.key{word-break:break-all;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+#msg{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:var(--ink);color:var(--bg);padding:9px 15px;border-radius:8px;display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Générateur de clés d’activation</h1>
+<p class="mut">Outil du vendeur. Il fonctionne entièrement sur cet ordinateur, sans internet : rien n’est envoyé nulle part. Ne le diffusez pas à vos clients et ne mettez jamais la clé privée sur le serveur d’un client.</p>
+
+<section class="card">
+  <h2>1. Créer vos clés (une seule fois)</h2>
+  <p class="mut">La <b>clé publique</b> se place dans <code>license-public.pem</code> à côté du serveur (elle vérifie les licences). La <b>clé privée</b> reste chez vous : elle seule peut créer des licences valides.</p>
+  <button id="gen">Générer une paire de clés</button>
+  <div id="genout" hidden>
+    <p class="warn">Enregistrez la clé privée tout de suite dans un endroit sûr (gestionnaire de mots de passe, clé USB). Si vous la perdez, vous ne pourrez plus créer de licences compatibles avec les logiciels déjà installés.</p>
+    <label>Clé publique (license-public.pem)<textarea id="pub" readonly></textarea></label>
+    <button class="sec" data-dl="pub" data-name="license-public.pem">Télécharger license-public.pem</button>
+    <label>Clé privée (vendor-private.pem), SECRET<textarea id="priv" readonly></textarea></label>
+    <button class="sec" data-dl="priv" data-name="vendor-private.pem">Télécharger vendor-private.pem</button>
+  </div>
+</section>
+
+<section class="card">
+  <h2>2. Créer une clé d’activation pour un client</h2>
+  <label>Clé privée (collez le contenu, ou choisissez le fichier vendor-private.pem)
+    <textarea id="privIn" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+  <input type="file" id="privFile" accept=".pem,.txt">
+  <div class="row">
+    <label>Nom du client<input id="cust" placeholder="Boutique Awa, Dakar"></label>
+    <label>Type<select id="type"><option value="annual">Annuelle</option><option value="lifetime">À vie</option></select></label>
+    <label id="daysL">Durée (jours)<input id="days" type="number" min="1" value="365"></label>
+    <label>Boutiques max. (facultatif)<input id="maxShops" type="number" min="1" placeholder="illimité"></label>
+  </div>
+  <button id="issue">Créer la clé d’activation</button>
+  <div id="issued" hidden>
+    <label>Clé à envoyer au client (Réglages &gt; Licence &gt; Activer)<textarea id="keyOut" readonly></textarea></label>
+    <button class="sec" id="copy">Copier la clé</button>
+  </div>
+</section>
+
+<section class="card">
+  <h2>3. Vérifier une clé</h2>
+  <label>Clé d’activation<textarea id="chkKey"></textarea></label>
+  <label>Clé publique<textarea id="chkPub" placeholder="-----BEGIN PUBLIC KEY-----"></textarea></label>
+  <button id="chk">Vérifier</button><p id="chkOut"></p>
+</section>
+
+<section class="card">
+  <h2>Clés créées sur cet ordinateur</h2>
+  <p class="mut">Ce registre est gardé dans ce navigateur uniquement (il disparaît si vous videz les données du navigateur) : conservez aussi vos propres notes.</p>
+  <div id="log"></div><button class="sec" id="clear">Vider le registre</button>
+</section>
+</main>
+<div id="msg" role="status"></div>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const enc = new TextEncoder();
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const b64u = (buf) => b64(buf).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const pem = (buf, label) => `-----BEGIN ${label}-----\n${b64(buf).match(/.{1,64}/g).join('\n')}\n-----END ${label}-----\n`;
+const unpem = (t) => Uint8Array.from(atob(t.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')), (c) => c.charCodeAt(0));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function msg(t) { const m = $('#msg'); m.textContent = t; m.style.display = 'block'; clearTimeout(msg.t); msg.t = setTimeout(() => { m.style.display = 'none'; }, 2600); }
+const run = (f) => async () => { try { await f(); } catch (e) { msg(e && e.name === 'NotSupportedError' ? 'Ce navigateur ne gère pas Ed25519 : utilisez un Chrome, Edge ou Firefox récent.' : (e.message || 'Erreur.')); } };
+
+$('#gen').onclick = run(async () => {
+  const k = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  $('#priv').value = pem(await crypto.subtle.exportKey('pkcs8', k.privateKey), 'PRIVATE KEY');
+  $('#pub').value = pem(await crypto.subtle.exportKey('spki', k.publicKey), 'PUBLIC KEY');
+  $('#genout').hidden = false; $('#privIn').value = $('#priv').value; $('#chkPub').value = $('#pub').value;
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dl]'); if (!b) return;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([$('#' + b.dataset.dl).value], { type: 'text/plain' }));
+  a.download = b.dataset.name; document.body.appendChild(a); a.click(); a.remove();
+});
+$('#privFile').onchange = async (e) => { if (e.target.files[0]) $('#privIn').value = await e.target.files[0].text(); };
+$('#type').onchange = () => { $('#daysL').style.display = $('#type').value === 'annual' ? '' : 'none'; };
+
+function log() { try { return JSON.parse(localStorage.getItem('issued') || '[]'); } catch { return []; } }
+function drawLog() {
+  const l = log();
+  $('#log').innerHTML = l.length ? `<table><tr><th>Date</th><th>Client</th><th>Type</th><th>Expire</th><th>Clé</th></tr>${l.map((r) => `<tr><td>${esc(r.issued)}</td><td>${esc(r.customer)}</td><td>${r.type === 'annual' ? 'Annuelle' : 'À vie'}</td><td>${esc(r.expires || '—')}</td><td class="key">${esc(r.key)}</td></tr>`).join('')}</table>` : '<p class="mut">Aucune clé créée pour le moment.</p>';
+}
+$('#clear').onclick = () => { if (confirm('Vider le registre de ce navigateur ?')) { try { localStorage.removeItem('issued'); } catch {} drawLog(); } };
+
+$('#issue').onclick = run(async () => {
+  const customer = $('#cust').value.trim(); if (!customer) return msg('Indiquez le nom du client.');
+  if (!$('#privIn').value.includes('PRIVATE KEY')) return msg('Collez ou chargez la clé privée.');
+  const priv = await crypto.subtle.importKey('pkcs8', unpem($('#privIn').value), { name: 'Ed25519' }, false, ['sign']);
+  const type = $('#type').value, issued = new Date().toISOString().slice(0, 10);
+  const payload = { customer, type, issued };
+  if (type === 'annual') payload.expires = new Date(Date.now() + (parseInt($('#days').value, 10) || 365) * 86400000).toISOString().slice(0, 10);
+  if ($('#maxShops').value) payload.max_shops = parseInt($('#maxShops').value, 10);
+  const body = b64u(enc.encode(JSON.stringify(payload)));
+  const key = body + '.' + b64u(await crypto.subtle.sign('Ed25519', priv, enc.encode(body)));
+  $('#keyOut').value = key; $('#issued').hidden = false;
+  try { localStorage.setItem('issued', JSON.stringify([{ issued, customer, type, expires: payload.expires || null, key }, ...log()])); } catch {}
+  drawLog();
+});
+$('#copy').onclick = async () => { $('#keyOut').select(); try { await navigator.clipboard.writeText($('#keyOut').value); } catch { document.execCommand('copy'); } msg('Clé copiée.'); };
+
+$('#chk').onclick = run(async () => {
+  const [body, sig] = $('#chkKey').value.trim().split('.');
+  const pub = await crypto.subtle.importKey('spki', unpem($('#chkPub').value), { name: 'Ed25519' }, false, ['verify']);
+  const ok = body && sig && await crypto.subtle.verify('Ed25519', pub, fromB64u(sig), enc.encode(body));
+  if (!ok) { $('#chkOut').innerHTML = '<span class="warn">Clé invalide ou non signée par cette clé publique.</span>'; return; }
+  const p = JSON.parse(new TextDecoder().decode(fromB64u(body)));
+  $('#chkOut').innerHTML = `<b>Clé valide.</b> Client : ${esc(p.customer)} · ${p.type === 'annual' ? 'annuelle, expire le ' + esc(p.expires) : 'à vie'}${p.max_shops ? ' · ' + esc(p.max_shops) + ' boutique(s) max.' : ''}`;
+});
+drawLog();
+</script>
+</body>
+</html>

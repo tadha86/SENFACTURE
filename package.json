@@ -1,0 +1,11 @@
+{
+  "name": "caisse-serveur",
+  "version": "0.1.0",
+  "description": "Serveur de facturation et gestion de stock (multi-utilisateurs, multi-caisses) - monoposte, réseau local ou cloud",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "test": "node --no-warnings --test"
+  }
+}
